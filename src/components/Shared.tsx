@@ -36,6 +36,51 @@ export function NotifBadge({ status }: { status: NotificationStatus }) {
   return <span className={cls}>{text}</span>;
 }
 
+// ---------- 重量差异复核徽章 ----------
+
+export function TicketLifecycleBadge({ lifecycle }: { lifecycle: 'current' | 'superseded' | 'rejected' }) {
+  const map = {
+    current: ['现行有效', 'badge green'],
+    superseded: ['已修订作废', 'badge gray'],
+    rejected: ['冲突拒纳', 'badge red'],
+  } as const;
+  const [text, cls] = map[lifecycle];
+  return <span className={cls}>{text}</span>;
+}
+
+export function StationVerifyBadge({ status }: { status: 'pending' | 'verified' | 'unknown-evidence' }) {
+  const map = {
+    pending: ['待核', 'badge gray'],
+    verified: ['已实测核实', 'badge green'],
+    'unknown-evidence': ['未知·待补证', 'badge orange'],
+  } as const;
+  const [text, cls] = map[status];
+  return <span className={cls}>{text}</span>;
+}
+
+export function JointStatusBadge({ status }: { status: 'draft' | 'issued' | 'reopened' }) {
+  const map = {
+    draft: ['草稿·待审依赖', 'badge gray'],
+    issued: ['已签发', 'badge green'],
+    reopened: ['已重开', 'badge red'],
+  } as const;
+  const [text, cls] = map[status];
+  return <span className={cls}>{text}</span>;
+}
+
+export function EvidenceStatusBadge({ status }: { status: string }) {
+  const map: Record<string, [string, string]> = {
+    open: ['待补证', 'badge orange'],
+    submitted: ['已提交待采用', 'badge blue'],
+    adopted: ['已采用为实测', 'badge green'],
+    returned: ['已退回', 'badge red'],
+    investigating: ['差异调查中', 'badge indigo'],
+    'closed-no-original': ['无原件·继续待核', 'badge gray'],
+  };
+  const [text, cls] = map[status] ?? [status, 'badge gray'];
+  return <span className={cls}>{text}</span>;
+}
+
 export function EventLogPanel({ events }: { events: EventLog[] }) {
   const sorted = events.slice().sort((a, b) => (b.id ?? 0) - (a.id ?? 0)).slice(0, 80);
   return (

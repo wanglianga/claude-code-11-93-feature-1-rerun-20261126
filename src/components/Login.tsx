@@ -7,6 +7,9 @@ const ROLE_NAME: Record<string, string> = {
   dispatcher: '调度员',
   driver: '司机',
   cs: '客服',
+  reviewer: '复核员',
+  'station-admin': '站点管理员',
+  crew: '班组',
 };
 
 export function Login({ onLogin }: { onLogin: (a: Account) => void }) {
@@ -28,7 +31,7 @@ export function Login({ onLogin }: { onLogin: (a: Account) => void }) {
     <div className="login-wrap">
       <form className="login-card" onSubmit={submit}>
         <h2>环卫线路工作台</h2>
-        <p className="muted">封路重排 · 扫码回执 · 通知核查（浏览器端演示，数据存于 IndexedDB）</p>
+        <p className="muted">封路重排 · 扫码回执 · 通知核查 · 重量差异补证复核（浏览器端演示，数据存于 IndexedDB）</p>
         <label>账号</label>
         <input className="input" value={username} onChange={(e) => setUsername(e.target.value)} />
         <label>密码</label>

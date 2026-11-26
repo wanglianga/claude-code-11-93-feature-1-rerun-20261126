@@ -1,8 +1,9 @@
 // 随题固定的虚构演示数据：路网、车辆、桶站、卸载点、居民预约通知
 // 全部 deterministic，可通过“重置并重放”随时恢复到 09:20 封路通知到达的现场。
 import type {
-  Account, Closure, DumpSite, EventLog, NodeDef, NotificationDoc,
-  Road, RouteVersion, Station, Vehicle,
+  Account, Closure, DumpSite, EventLog, EvidenceRequest, JointReview, NodeDef,
+  NotificationDoc, Road, RouteVersion, SealRecord, Station, StationVerification,
+  Vehicle, WeightTicket,
 } from '../types';
 
 export const START_MIN = 560; // 09:20，封路通知到达
@@ -14,6 +15,10 @@ export const ACCOUNTS: Account[] = [
   { id: 'D01', username: 'driver1', password: 'drv123', name: '老王', role: 'driver', vehicleId: 'T1' },
   { id: 'D02', username: 'driver2', password: 'drv123', name: '小李', role: 'driver', vehicleId: 'T2' },
   { id: 'U-CS', username: 'service', password: 'svc123', name: '陈客服', role: 'cs' },
+  // —— 重量差异补证复核线 ——
+  { id: 'U-REV', username: 'reviewer', password: 'rev123', name: '周复核', role: 'reviewer' },
+  { id: 'U-ADMIN', username: 'stationadmin', password: 'adm123', name: '吴站长', role: 'station-admin' },
+  { id: 'U-CREW', username: 'crew', password: 'crew123', name: '郑班组', role: 'crew' },
 ];
 
 export const NODES: NodeDef[] = [
@@ -157,3 +162,94 @@ export const SEED_EVENTS: EventLog[] = [
 export function credentialOf(stationId: string): string {
   return `QR-${stationId}-20261126`;
 }
+
+// ===================== 重量差异补证复核（TRIP-1） =====================
+// 线路依次 S1、S2、S3；估重 0.7 / 1.2 / 0.8 吨。
+// 出车空载毛重 4.00±0.05；完成三站后终磅 7.60±0.10（后可更正为 7.80±0.10）。
+// S1、S2 有效秤票 0.70±0.05 与 1.00±0.10；S3 无票。三段封闭签认均有效，样例证明无其他加料/卸料/换车。
+export const TRIP_ID = 'TRIP-1';
+export const TRIP_STATION_IDS = ['S1', 'S2', 'S3'];
+export const TRIP_EST: Record<string, number> = { S1: 0.7, S2: 1.2, S3: 0.8 };
+
+export const WEIGHT_TICKETS: WeightTicket[] = [
+  {
+    id: 'WT-TARE-1', ticketNo: 'WB-TARE-001', tripId: TRIP_ID, kind: 'tare',
+    measure: { value: 4.0, tol: 0.05 }, calibrationValid: true, lifecycle: 'current',
+    submittedBy: 'D01', submittedByName: '老王', submittedAtMin: 480, deviceTimeMin: 480, offline: false,
+    note: '出车空载毛重（地磅）',
+  },
+  {
+    id: 'WT-FINAL-1', ticketNo: 'WB-FINAL-001', tripId: TRIP_ID, kind: 'final',
+    measure: { value: 7.6, tol: 0.1 }, calibrationValid: true, lifecycle: 'current',
+    submittedBy: 'D01', submittedByName: '老王', submittedAtMin: 630, deviceTimeMin: 630, offline: false,
+    note: '完成三站后终磅（地磅）',
+  },
+  {
+    id: 'WT-S1-1', ticketNo: 'WB-S1-001', tripId: TRIP_ID, kind: 'station', stationId: 'S1',
+    measure: { value: 0.7, tol: 0.05 }, calibrationValid: true, lifecycle: 'current',
+    submittedBy: 'D01', submittedByName: '老王', submittedAtMin: 520, deviceTimeMin: 520, offline: false,
+    note: '梧桐里站站点秤票',
+  },
+  {
+    id: 'WT-S2-1', ticketNo: 'WB-S2-001', tripId: TRIP_ID, kind: 'station', stationId: 'S2',
+    measure: { value: 1.0, tol: 0.1 }, calibrationValid: true, lifecycle: 'current',
+    submittedBy: 'D01', submittedByName: '老王', submittedAtMin: 550, deviceTimeMin: 550, offline: false,
+    note: '桥东市场站站点秤票',
+  },
+  // S3  deliberately 无票：缺站点秤票，只能待查派补证。
+];
+
+export const SEAL_RECORDS: SealRecord[] = [
+  {
+    id: 'SEAL-1', tripId: TRIP_ID, stage: 'depot-s1', label: '出车→S1',
+    signedBy: '郑班组', signedAtMin: 485, noAddNoUnload: true, valid: true, offline: false,
+    note: '载荷变动日志：本阶段无加料、无卸料、未换车',
+  },
+  {
+    id: 'SEAL-2', tripId: TRIP_ID, stage: 's1-s2', label: 'S1→S2',
+    signedBy: '郑班组', signedAtMin: 525, noAddNoUnload: true, valid: true, offline: false,
+    note: '载荷变动日志：本阶段无加料、无卸料、未换车',
+  },
+  {
+    id: 'SEAL-3', tripId: TRIP_ID, stage: 's2-final', label: 'S2→终磅',
+    signedBy: '郑班组', signedAtMin: 555, noAddNoUnload: true, valid: true, offline: false,
+    note: '载荷变动日志：本阶段无加料、无卸料、未换车',
+  },
+];
+
+export const STATION_VERIFICATIONS: StationVerification[] = [
+  { id: 'SV-S1', tripId: TRIP_ID, stationId: 'S1', seq: 1, estTon: 0.7, status: 'pending' },
+  { id: 'SV-S2', tripId: TRIP_ID, stationId: 'S2', seq: 2, estTon: 1.2, status: 'pending' },
+  { id: 'SV-S3', tripId: TRIP_ID, stationId: 'S3', seq: 3, estTon: 0.8, status: 'unknown-evidence',
+    note: '无站点秤票，事实待查：已派补证，不得用估重或整车差额填作实收' },
+];
+
+export const JOINT_REVIEWS: JointReview[] = [
+  {
+    id: 'JR-1', tripId: TRIP_ID, status: 'draft',
+    checks: { tareTicket: false, finalTicket: false, sealDepotS1: false, sealS1S2: false, sealS2Final: false },
+    basedOnFinalTicketId: 'WT-FINAL-1', basedOnTareTicketId: 'WT-TARE-1',
+    history: [
+      { atMin: 635, actor: '系统', message: '联合复核单建立：须逐项审核 2 张地磅票与 3 段封闭签认（共 5 项依赖）后方可签发' },
+    ],
+  },
+];
+
+export const EVIDENCE_REQUESTS: EvidenceRequest[] = [
+  {
+    id: 'ER-S3', tripId: TRIP_ID, stationId: 'S3', status: 'open',
+    reason: '朝阳小区站缺站点秤票原件，无法独立核实本站实收重量',
+    openedAtMin: 640, openedBy: '周复核',
+    note: '逐站边界：S3 保留未知并派补证，不等待跨站材料；补证到位前不给量化范围',
+  },
+];
+
+export const MID_UNLOADS: import('../types').MidUnload[] = [];
+
+export const RECON_SEED_EVENTS: EventLog[] = [
+  { tsMin: 480, actor: '老王', type: 'recon-ticket', message: 'TRIP-1 出车空载地磅票 4.00±0.05 提交（WB-TARE-001，校准有效）' },
+  { tsMin: 520, actor: '老王', type: 'recon-ticket', message: 'TRIP-1 S1 站点秤票 0.70±0.05 提交（WB-S1-001，校准有效）' },
+  { tsMin: 550, actor: '老王', type: 'recon-ticket', message: 'TRIP-1 S2 站点秤票 1.00±0.10 提交（WB-S2-001，校准有效）' },
+  { tsMin: 630, actor: '老王', type: 'recon-ticket', message: 'TRIP-1 终磅地磅票 7.60±0.10 提交（WB-FINAL-001，校准有效）；S3 无站点秤票' },
+  { tsMin: 640, actor: '周复核', type: 'recon-case', message: 'TRIP-1 重量差异补证案件建立：S1/S2 可逐站核实，S3 缺票派补证' },
+];

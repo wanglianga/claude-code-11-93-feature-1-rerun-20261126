@@ -1,12 +1,13 @@
 // IndexedDB 持久层（idb 封装）：全部业务状态落库，可一键重置重放
 import { openDB, type IDBPDatabase } from 'idb';
 import type {
-  Closure, DumpSite, EventLog, NotificationDoc, Receipt, Road, RouteVersion, Station, Vehicle,
+  Closure, DumpSite, EventLog, EvidenceRequest, JointReview, MidUnload, NotificationDoc,
+  Receipt, Road, RouteVersion, SealRecord, Station, StationVerification, Vehicle, WeightTicket,
 } from '../types';
 import * as seed from './seed';
 
 const DB_NAME = 'sanitation-workbench';
-const DB_VERSION = 1;
+const DB_VERSION = 2;
 
 export interface Snapshot {
   nowMin: number;
@@ -20,6 +21,13 @@ export interface Snapshot {
   receipts: Receipt[];
   outbox: Receipt[];
   events: EventLog[];
+  // —— 重量差异补证复核 ——
+  weightTickets: WeightTicket[];
+  seals: SealRecord[];
+  stationVerifications: StationVerification[];
+  jointReviews: JointReview[];
+  evidenceRequests: EvidenceRequest[];
+  midUnloads: MidUnload[];
 }
 
 let dbPromise: Promise<IDBPDatabase> | null = null;
@@ -27,18 +35,30 @@ let dbPromise: Promise<IDBPDatabase> | null = null;
 export function getDb(): Promise<IDBPDatabase> {
   if (!dbPromise) {
     dbPromise = openDB(DB_NAME, DB_VERSION, {
-      upgrade(db) {
-        db.createObjectStore('meta');
-        db.createObjectStore('vehicles', { keyPath: 'id' });
-        db.createObjectStore('stations', { keyPath: 'id' });
-        db.createObjectStore('roads', { keyPath: 'id' });
-        db.createObjectStore('closures', { keyPath: 'id' });
-        db.createObjectStore('dumps', { keyPath: 'id' });
-        db.createObjectStore('notifications', { keyPath: 'id' });
-        db.createObjectStore('routeVersions', { keyPath: 'id' });
-        db.createObjectStore('receipts', { keyPath: 'id' });
-        db.createObjectStore('outbox', { keyPath: 'id' });
-        db.createObjectStore('events', { keyPath: 'id', autoIncrement: true });
+      upgrade(db, oldVersion) {
+        // v1 既有仓库（旧库升级时按版本补建，保证可重放）
+        if (oldVersion < 1) {
+          db.createObjectStore('meta');
+          db.createObjectStore('vehicles', { keyPath: 'id' });
+          db.createObjectStore('stations', { keyPath: 'id' });
+          db.createObjectStore('roads', { keyPath: 'id' });
+          db.createObjectStore('closures', { keyPath: 'id' });
+          db.createObjectStore('dumps', { keyPath: 'id' });
+          db.createObjectStore('notifications', { keyPath: 'id' });
+          db.createObjectStore('routeVersions', { keyPath: 'id' });
+          db.createObjectStore('receipts', { keyPath: 'id' });
+          db.createObjectStore('outbox', { keyPath: 'id' });
+          db.createObjectStore('events', { keyPath: 'id', autoIncrement: true });
+        }
+        // v2 复核仓库
+        if (oldVersion < 2) {
+          db.createObjectStore('weightTickets', { keyPath: 'id' });
+          db.createObjectStore('seals', { keyPath: 'id' });
+          db.createObjectStore('stationVerifications', { keyPath: 'id' });
+          db.createObjectStore('jointReviews', { keyPath: 'id' });
+          db.createObjectStore('evidenceRequests', { keyPath: 'id' });
+          db.createObjectStore('midUnloads', { keyPath: 'id' });
+        }
       },
     });
   }
@@ -47,7 +67,8 @@ export function getDb(): Promise<IDBPDatabase> {
 
 export async function loadSnapshot(): Promise<Snapshot> {
   const db = await getDb();
-  const [nowMin, vehicles, stations, roads, closures, dumps, notifications, routeVersions, receipts, outbox, events] =
+  const [nowMin, vehicles, stations, roads, closures, dumps, notifications, routeVersions, receipts, outbox, events,
+    weightTickets, seals, stationVerifications, jointReviews, evidenceRequests, midUnloads] =
     await Promise.all([
       db.get('meta', 'nowMin'),
       db.getAll('vehicles'),
@@ -60,11 +81,18 @@ export async function loadSnapshot(): Promise<Snapshot> {
       db.getAll('receipts'),
       db.getAll('outbox'),
       db.getAll('events'),
+      db.getAll('weightTickets'),
+      db.getAll('seals'),
+      db.getAll('stationVerifications'),
+      db.getAll('jointReviews'),
+      db.getAll('evidenceRequests'),
+      db.getAll('midUnloads'),
     ]);
   return {
     nowMin: nowMin ?? seed.START_MIN,
     vehicles, stations, roads, closures, dumps, notifications, routeVersions, receipts, outbox,
     events: (events as EventLog[]).sort((a, b) => (a.id ?? 0) - (b.id ?? 0)),
+    weightTickets, seals, stationVerifications, jointReviews, evidenceRequests, midUnloads,
   };
 }
 
@@ -74,6 +102,7 @@ export async function resetAndSeed(): Promise<void> {
   const stores = [
     'meta', 'vehicles', 'stations', 'roads', 'closures', 'dumps',
     'notifications', 'routeVersions', 'receipts', 'outbox', 'events',
+    'weightTickets', 'seals', 'stationVerifications', 'jointReviews', 'evidenceRequests', 'midUnloads',
   ];
   const tx = db.transaction(stores, 'readwrite');
   for (const s of stores) await tx.objectStore(s).clear();
@@ -86,6 +115,14 @@ export async function resetAndSeed(): Promise<void> {
   for (const n of seed.NOTIFICATIONS) await tx.objectStore('notifications').put(n);
   for (const rv of seed.ROUTE_VERSIONS) await tx.objectStore('routeVersions').put(rv);
   for (const e of seed.SEED_EVENTS) await tx.objectStore('events').add(e);
+  // 复核场景
+  for (const t of seed.WEIGHT_TICKETS) await tx.objectStore('weightTickets').put(t);
+  for (const s of seed.SEAL_RECORDS) await tx.objectStore('seals').put(s);
+  for (const v of seed.STATION_VERIFICATIONS) await tx.objectStore('stationVerifications').put(v);
+  for (const j of seed.JOINT_REVIEWS) await tx.objectStore('jointReviews').put(j);
+  for (const r of seed.EVIDENCE_REQUESTS) await tx.objectStore('evidenceRequests').put(r);
+  for (const u of seed.MID_UNLOADS) await tx.objectStore('midUnloads').put(u);
+  for (const e of seed.RECON_SEED_EVENTS) await tx.objectStore('events').add(e);
   await tx.done;
 }
 
